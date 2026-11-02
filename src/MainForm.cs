@@ -20,9 +20,12 @@ namespace SoundLevel
         private LevelSlider _slider;
         private PillToggle _toggle;
         private PillToggle _autoToggle;
+        private PillToggle _learnToggle;
         private CircleButton _playBtn;
         private IconButton _minBtn;
         private IconButton _closeBtn;
+
+        private readonly Learner _learner = new Learner();
 
         private SoundPlayer _player;
         private bool _playing;
@@ -33,6 +36,7 @@ namespace SoundLevel
         private bool _calibrated;
         private string _calibratedAt = "";
         private double _flashUntil = -1;
+        private double _learnFlashUntil = -1;
 
         private double _lastTick;
         private double _lastRefresh = -10;
@@ -57,6 +61,14 @@ namespace SoundLevel
             }
 
             _engine = new AudioEngine(_cfg);
+
+            _learner.Load(PrefsPath);
+            _engine.Offsets = _learner.Offsets;
+            _learner.Changed += delegate
+            {
+                _learner.Save(PrefsPath);
+                _learnFlashUntil = _clock.Elapsed.TotalSeconds + 4.0;
+            };
 
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterScreen;
@@ -151,6 +163,23 @@ namespace SoundLevel
                 else Autostart.Disable();
             };
             Controls.Add(_autoToggle);
+
+            _learnToggle = new PillToggle();
+            _learnToggle.LabelOn = "学习";
+            _learnToggle.LabelOff = "学习";
+            _learnToggle.Bounds = new Rectangle(Theme.S(242), Theme.S(H - 44), Theme.S(78), Theme.S(30));
+            _learnToggle.Checked = _learner.Enabled;
+            _learnToggle.CheckedChanged += delegate
+            {
+                _learner.Enabled = _learnToggle.Checked;
+                _learner.Save(PrefsPath);
+            };
+            Controls.Add(_learnToggle);
+        }
+
+        private static string PrefsPath
+        {
+            get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "prefs.ini"); }
         }
 
         private void SetRoundedRegion()
@@ -231,8 +260,13 @@ namespace SoundLevel
             string header = rows.Count > 0 ? "正在发声 · " + rows.Count : "正在发声";
             Theme.DrawText(g, header, Theme.FBody, Theme.Dim, Theme.S(20), Theme.S(352));
 
-            Theme.TextRight(g, "目标 " + _cfg.TargetDb.ToString("0.0") + " dBFS",
-                Theme.FSmall, Theme.Faint, Theme.S(W - 20), Theme.S(355));
+            string dev = _engine.EndpointPeak > 0
+                ? "设备 " + AudioEngine.FormatDb(20 * Math.Log10(_engine.EndpointPeak)) + " dB"
+                : "设备 —";
+            string vol = _engine.MasterScalar > 0
+                ? "音量 " + (_engine.MasterScalar * 100).ToString("0") + "%   "
+                : "";
+            Theme.TextRight(g, vol + dev, Theme.FSmall, Theme.Faint, Theme.S(W - 20), Theme.S(355));
 
             if (rows.Count == 0)
             {
@@ -298,7 +332,9 @@ namespace SoundLevel
             }
 
             string right;
-            if (!_toggle.Checked) right = "已暂停";
+            if (_learnFlashUntil > _clock.Elapsed.TotalSeconds && _learner.LastNote.Length > 0)
+                right = "学到 " + _learner.LastNote;
+            else if (!_toggle.Checked) right = "已暂停";
             else
             {
                 int n = 0;
@@ -401,6 +437,7 @@ namespace SoundLevel
             _lastTick = now;
 
             try { _engine.Tick(dt); } catch { }
+            try { _learner.Tick(_engine.MasterScalar, _engine.Sessions, now); } catch { }
 
             if (now - _lastRefresh >= 1.0)
             {
@@ -451,6 +488,7 @@ namespace SoundLevel
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             StopTone();
+            try { _learner.Save(PrefsPath); } catch { }
             try { _engine.RestoreAll(); } catch { }
             try { _engine.Dispose(); } catch { }
             base.OnFormClosing(e);

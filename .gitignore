@@ -6,6 +6,7 @@ selftest.exe
 
 # 本地状态（每台机器不同）
 calibration.ini
+prefs.ini
 
 # 私人笔记
 Windows全局响度一致_调研报告.md

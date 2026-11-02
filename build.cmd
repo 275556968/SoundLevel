@@ -20,8 +20,8 @@ if not exist "%SPEECH%" (
 set SRC=^
   "%~dp0src\Interop.cs" "%~dp0src\Native.cs" "%~dp0src\AudioEngine.cs" ^
   "%~dp0src\SpeechClip.cs" "%~dp0src\Calibration.cs" "%~dp0src\Autostart.cs" ^
-  "%~dp0src\Theme.cs" "%~dp0src\Controls.cs" "%~dp0src\MainForm.cs" ^
-  "%~dp0src\GuiMain.cs" "%~dp0src\SelfTest.cs"
+  "%~dp0src\Learner.cs" "%~dp0src\Theme.cs" "%~dp0src\Controls.cs" ^
+  "%~dp0src\MainForm.cs" "%~dp0src\GuiMain.cs" "%~dp0src\SelfTest.cs"
 
 set REFS=/r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:"%SPEECH%"
 

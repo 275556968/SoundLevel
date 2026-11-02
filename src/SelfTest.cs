@@ -41,10 +41,36 @@ namespace SoundLevel
                     Console.WriteLine("autostart=" + Autostart.IsEnabled());
                     return 0;
                 }
+                else if (args[i] == "--learn-sim")
+                {
+                    Learner L = new Learner();
+                    List<SessionInfo> fake = new List<SessionInfo>();
+                    SessionInfo s = new SessionInfo();
+                    s.ProcessName = "testapp";
+                    s.Active = true;
+                    s.EnvDb = -20;
+                    fake.Add(s);
+
+                    double t = 0;
+                    L.Tick(1.0, fake, t);
+                    t += 0.1; L.Tick(1.0, fake, t);
+                    t += 0.1; L.Tick(0.5, fake, t);       // 用户把音量拉到一半（-6 dB）
+                    t += 2.0; L.Tick(0.5, fake, t);       // 松手后结算
+                    Console.WriteLine("offset = " + L.OffsetFor("testapp").ToString("0.00") + " dB");
+                    Console.WriteLine("note   = " + L.LastNote);
+
+                    t += 0.1; L.Tick(1.0, fake, t);       // 再拉回来
+                    t += 2.0; L.Tick(1.0, fake, t);
+                    Console.WriteLine("offset = " + L.OffsetFor("testapp").ToString("0.00") + " dB");
+                    return 0;
+                }
             }
 
             EngineConfig cfg = new EngineConfig();
             AudioEngine engine = new AudioEngine(cfg);
+
+            Learner learner = new Learner();
+            engine.Offsets = learner.Offsets;
 
             Console.WriteLine("设备: " + engine.DeviceName);
             Console.WriteLine("目标: " + cfg.TargetDb.ToString("0.0") + " dBFS");
@@ -77,6 +103,7 @@ namespace SoundLevel
                 lastTick = now;
 
                 engine.Tick(dt);
+                learner.Tick(engine.MasterScalar, engine.Sessions, now);
 
                 if (now - lastRefresh >= 1.0)
                 {
@@ -100,7 +127,8 @@ namespace SoundLevel
                     }
                     Console.WriteLine("        safety=" + AudioEngine.FormatDb(engine.SafetyTrimDb) +
                                       "dB  endpoint=" + AudioEngine.FormatDb(
-                                          engine.EndpointPeak <= 0 ? -120 : 20 * Math.Log(engine.EndpointPeak)) + "dB");
+                                          engine.EndpointPeak <= 0 ? -120 : 20 * Math.Log(engine.EndpointPeak)) + "dB" +
+                                      "  master=" + engine.MasterScalar.ToString("0.00"));
                 }
 
                 Thread.Sleep(100);
@@ -109,6 +137,11 @@ namespace SoundLevel
             if (player != null) { player.Stop(); player.Dispose(); }
             engine.RestoreAll();
             engine.Dispose();
+
+            Console.WriteLine("learned = " + learner.LearnCount + "  " + learner.LastNote);
+            foreach (KeyValuePair<string, double> kv in learner.Offsets)
+                Console.WriteLine("  " + kv.Key + " = " + kv.Value.ToString("0.00") + " dB");
+
             Console.WriteLine("done.");
             return 0;
         }

@@ -51,6 +51,7 @@ namespace SoundLevel
         private IMMDevice _device;
         private IAudioSessionManager2 _manager;
         private IAudioMeterInformation _endpointMeter;
+        private IAudioEndpointVolume _endpointVolume;
 
         private readonly Dictionary<string, SessionInfo> _sessions =
             new Dictionary<string, SessionInfo>(StringComparer.Ordinal);
@@ -66,6 +67,12 @@ namespace SoundLevel
         public string DeviceName { get; private set; }
 
         public bool Enabled = true;
+
+        /// <summary>每个进程的长期偏好偏移（dB），由 Learner 维护。</summary>
+        public IDictionary<string, double> Offsets;
+
+        /// <summary>系统主音量 0..1（每次 Tick 刷新）。</summary>
+        public double MasterScalar = -1.0;
 
         public double TargetDb { get { return _cfg.TargetDb; } }
 
@@ -143,9 +150,14 @@ namespace SoundLevel
                 Guid iidMeter = typeof(IAudioMeterInformation).GUID;
                 dev.Activate(ref iidMeter, 0, IntPtr.Zero, out meterObj);
 
+                object volObj = null;
+                Guid iidVol = typeof(IAudioEndpointVolume).GUID;
+                dev.Activate(ref iidVol, 0, IntPtr.Zero, out volObj);
+
                 _device = dev;
                 _manager = (IAudioSessionManager2)mgrObj;
                 _endpointMeter = meterObj as IAudioMeterInformation;
+                _endpointVolume = volObj as IAudioEndpointVolume;
                 DeviceName = DescribeDevice(dev);
                 return true;
             }
@@ -291,24 +303,30 @@ namespace SoundLevel
         {
             if (_manager == null) { AcquireDevice(); return; }
 
-            if (_cfg.SafetyTrim)
+            // 设备电平：不管开不开总线保护都读，界面要显示
+            if (_endpointMeter != null)
             {
-                if (_endpointMeter != null)
+                float ep;
+                if (_endpointMeter.GetPeakValue(out ep) == 0) _endpointPeak = ep;
+            }
+
+            if (_endpointVolume != null)
+            {
+                float m;
+                if (_endpointVolume.GetMasterVolumeLevelScalar(out m) == 0) MasterScalar = m;
+            }
+
+            if (_cfg.SafetyTrim && _endpointMeter != null)
+            {
+                double ep = _endpointPeak;
+                if (ep > 0.90) _safetyTrimDb -= 2.0 * dt * 5;
+                else if (ep < 0.45 && (DateTime.UtcNow - _lastSafetyRecover).TotalMilliseconds > 400)
                 {
-                    float ep;
-                    if (_endpointMeter.GetPeakValue(out ep) == 0)
-                    {
-                        _endpointPeak = ep;
-                        if (ep > 0.90f) _safetyTrimDb -= 2.0 * dt * 5;
-                        else if (ep < 0.45f && (DateTime.UtcNow - _lastSafetyRecover).TotalMilliseconds > 400)
-                        {
-                            _safetyTrimDb += 0.5;
-                            _lastSafetyRecover = DateTime.UtcNow;
-                        }
-                        if (_safetyTrimDb < -18.0) _safetyTrimDb = -18.0;
-                        if (_safetyTrimDb > 0.0) _safetyTrimDb = 0.0;
-                    }
+                    _safetyTrimDb += 0.5;
+                    _lastSafetyRecover = DateTime.UtcNow;
                 }
+                if (_safetyTrimDb < -18.0) _safetyTrimDb = -18.0;
+                if (_safetyTrimDb > 0.0) _safetyTrimDb = 0.0;
             }
 
             foreach (var s in _sessions.Values)
@@ -336,7 +354,10 @@ namespace SoundLevel
 
                     if (s.Active && !muted && s.EnvDb > _cfg.GateDb)
                     {
-                        double desired = Clamp(_cfg.TargetDb - s.EnvDb, -_cfg.MaxCutDb, _cfg.MaxBoostDb);
+                        double off = 0.0;
+                        if (Offsets != null) Offsets.TryGetValue(s.ProcessName, out off);
+
+                        double desired = Clamp(_cfg.TargetDb - s.EnvDb + off, -_cfg.MaxCutDb, _cfg.MaxBoostDb);
                         if (Math.Abs(desired - s.GainDb) > _cfg.DeadbandDb)
                         {
                             double step = Clamp(desired - s.GainDb, -_cfg.SlewDbPerSec * dt, _cfg.SlewDbPerSec * dt);
