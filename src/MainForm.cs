@@ -32,6 +32,10 @@ namespace SoundLevel
         private bool _toneBound;
         private int _bindTries;
 
+        private NotifyIcon _tray;
+        private bool _reallyExit;
+        private bool _balloonShown;
+
         private double _refDb = -12.0;
         private bool _calibrated;
         private string _calibratedAt = "";
@@ -94,9 +98,20 @@ namespace SoundLevel
 
             SpeechClip.PrepareAsync();
             Autostart.Repair();
+            SetupTray();
             _timer.Start();
+        }
 
-            if (_startMinimized) WindowState = FormWindowState.Minimized;
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+
+            // 开机自启时直接进托盘，不弹窗、不抢焦点
+            if (_startMinimized)
+            {
+                _balloonShown = true;
+                Hide();
+            }
         }
 
         // ------------------------------------------------------------- layout
@@ -487,11 +502,89 @@ namespace SoundLevel
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            // 点右上角 × 只是收进托盘，程序继续在后台调音量
+            if (!_reallyExit && e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;
+                HideToTray();
+                return;
+            }
+
             StopTone();
             try { _learner.Save(PrefsPath); } catch { }
             try { _engine.RestoreAll(); } catch { }
             try { _engine.Dispose(); } catch { }
+
+            if (_tray != null)
+            {
+                _tray.Visible = false;
+                _tray.Dispose();
+                _tray = null;
+            }
+
             base.OnFormClosing(e);
+        }
+
+        // --------------------------------------------------------------- tray
+
+        private void SetupTray()
+        {
+            Icon ico = null;
+            try { ico = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+            catch { }
+            if (ico == null) ico = SystemIcons.Application;
+
+            ContextMenuStrip menu = new ContextMenuStrip();
+            menu.Font = Theme.FBody;
+
+            ToolStripMenuItem show = new ToolStripMenuItem("打开面板");
+            show.Click += delegate { RestoreFromTray(); };
+
+            ToolStripMenuItem pause = new ToolStripMenuItem("暂停 / 继续");
+            pause.Click += delegate { _toggle.Checked = !_toggle.Checked; };
+
+            ToolStripMenuItem exit = new ToolStripMenuItem("退出");
+            exit.Click += delegate
+            {
+                _reallyExit = true;
+                Close();
+            };
+
+            menu.Items.Add(show);
+            menu.Items.Add(pause);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(exit);
+
+            _tray = new NotifyIcon();
+            _tray.Icon = ico;
+            _tray.Text = "SoundLevel · 响度平衡";
+            _tray.ContextMenuStrip = menu;
+            _tray.Visible = true;
+            _tray.DoubleClick += delegate { RestoreFromTray(); };
+        }
+
+        private void HideToTray()
+        {
+            Hide();
+
+            if (!_balloonShown && _tray != null)
+            {
+                _balloonShown = true;
+                try
+                {
+                    _tray.ShowBalloonTip(2500, "SoundLevel 还在后台运行",
+                        "点托盘图标可以重新打开，右键可以退出。", ToolTipIcon.Info);
+                }
+                catch { }
+            }
+        }
+
+        private void RestoreFromTray()
+        {
+            Show();
+            WindowState = FormWindowState.Normal;
+            Activate();
+            BringToFront();
         }
 
         private static void LoadIni(EngineConfig cfg)

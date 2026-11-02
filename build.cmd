@@ -26,7 +26,8 @@ set SRC=^
 set REFS=/r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:"%SPEECH%"
 
 echo [1/2] building SoundLevel.exe ...
-"%CSC%" /nologo /target:winexe /platform:anycpu /optimize+ %REFS% /main:SoundLevel.GuiMain ^
+"%CSC%" /nologo /target:winexe /platform:anycpu /optimize+ %REFS% ^
+  /win32icon:"%~dp0app.ico" /main:SoundLevel.GuiMain ^
   /out:"%~dp0SoundLevel.exe" %SRC%
 if errorlevel 1 goto fail
 
